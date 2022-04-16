@@ -1,21 +1,32 @@
 import { describe, test, expect, jest } from "@jest/globals";
+import { logger } from "../../src/logger.js";
 import Routes from "../../src/routes.js";
+import UploadHandler from "../../src/uploadHandler.js";
+import TestUtil from "../_util/testUtil.js";
 
 describe("Routes", () => {
+  const request = TestUtil.generateReadableStream(["some file bytes"]);
+  const response = TestUtil.generateWritableStream(() => {});
+
   const defaultParams = {
-    request: {
+    request: Object.assign(request, {
       headers: {
-        "Content-Type": "multipart/form-data",
+        "content-type": "multipart/form-data",
       },
       method: "",
+      url: "",
       body: {},
-    },
-    response: {
+    }),
+    response: Object.assign(response, {
       setHeader: jest.fn(),
       writeHead: jest.fn(),
       end: jest.fn(),
-    },
+    }),
   };
+
+  beforeEach(() => {
+    jest.spyOn(logger, "info").mockImplementation();
+  });
 
   describe("setSocketInstance", () => {
     test("setSocketInstance should store io instance", () => {
@@ -79,10 +90,10 @@ describe("Routes", () => {
       };
 
       params.request.method = "POST";
+      jest.spyOn(routes, "post").mockResolvedValue();
 
       await routes.handler(params.request, params.response);
-
-      expect(params.response.end).toHaveBeenCalled();
+      expect(routes.post).toHaveBeenCalled();
     });
 
     test("given method GET it should choose get route", async () => {
@@ -92,9 +103,10 @@ describe("Routes", () => {
       };
 
       params.request.method = "GET";
+      jest.spyOn(routes, "get").mockResolvedValue();
       await routes.handler(params.request, params.response);
 
-      expect(params.response.end).toHaveBeenCalled();
+      expect(routes.get).toHaveBeenCalled();
     });
   });
 
@@ -122,6 +134,33 @@ describe("Routes", () => {
       expect(params.response.writeHead).toHaveBeenCalledWith(200);
       expect(params.response.end).toHaveBeenCalledWith(
         JSON.stringify(filesStatusesMock)
+      );
+    });
+  });
+
+  describe("post", () => {
+    test("it should validate post route workflow", async () => {
+      const routes = new Routes("/tmp");
+      const params = {
+        ...defaultParams,
+      };
+      params.request.method = "POST";
+      params.request.url = "?socketId=10";
+
+      jest
+        .spyOn(UploadHandler.prototype, "registerEvents")
+        .mockImplementation((headers, onFinish) => {
+          const writable = TestUtil.generateWritableStream(() => {});
+          writable.on("finish", onFinish);
+          return writable;
+        });
+
+      await routes.handler(params.request, params.response);
+
+      expect(UploadHandler.prototype.registerEvents).toHaveBeenCalled();
+      expect(params.response.writeHead).toHaveBeenCalledWith(200);
+      expect(defaultParams.response.end).toHaveBeenCalledWith(
+        JSON.stringify({ result: "Files uploaded with success" })
       );
     });
   });
